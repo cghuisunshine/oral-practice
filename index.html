@@ -55,6 +55,8 @@ button {
 <textarea id="scriptInput" placeholder="Paste your script here..."></textarea>
 
 <br>
+<input id="fileInput" type="file" accept=".txt,.md,text/plain" style="display:none">
+<button id="importBtn" type="button">Import File</button>
 <button id="loadBtn" type="button">Load Script</button>
 <button id="startBtn" type="button">Start Practice</button>
 
@@ -127,6 +129,29 @@ function loadScript() {
 
 document.getElementById("loadBtn").addEventListener("click", loadScript);
 document.getElementById("startBtn").addEventListener("click", startListening);
+
+document.getElementById("importBtn").addEventListener("click", function() {
+  document.getElementById("fileInput").click();
+});
+
+document.getElementById("fileInput").addEventListener("change", function(e) {
+  const file = e.target && e.target.files ? e.target.files[0] : null;
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function() {
+    const text = typeof reader.result === "string" ? reader.result : "";
+    document.getElementById("scriptInput").value = text;
+    loadScript();
+  };
+  reader.onerror = function() {
+    alert("Failed to read file.");
+  };
+
+  reader.readAsText(file);
+  // Allow selecting the same file again later.
+  e.target.value = "";
+});
 
 function updateProgress() {
   let percent = sentences.length === 0 ? 0 :
