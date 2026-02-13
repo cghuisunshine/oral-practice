@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Universal Oral Practice Highlighter</title>
+
+<style>
+body {
+  font-family: Arial, sans-serif;
+  max-width: 900px;
+  margin: 40px auto;
+  line-height: 1.6;
+}
+
+textarea {
+  width: 100%;
+  height: 150px;
+  padding: 10px;
+  font-size: 14px;
+}
+
+button {
+  padding: 10px 20px;
+  margin: 10px 5px 20px 0;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.sentence {
+  padding: 8px;
+  margin-bottom: 5px;
+  border-radius: 6px;
+  transition: 0.3s;
+}
+
+.current {
+  background-color: yellow;
+}
+
+.done {
+  background-color: lightgreen;
+}
+
+#progress {
+  margin: 15px 0;
+  font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<h2>🎤 Oral Practice Tool</h2>
+
+<textarea id="scriptInput" placeholder="Paste your script here..."></textarea>
+
+<br>
+<button id="loadBtn" type="button">Load Script</button>
+<button id="startBtn" type="button">Start Practice</button>
+
+<div id="progress">Progress: 0%</div>
+
+<div id="heard" style="font-size: 13px; color: #555; margin-bottom: 10px;"></div>
+
+<hr>
+
+<div id="scriptDisplay"></div>
+
+<script>
+
+let sentences = [];
+let currentIndex = 0;
+let recognition;
+let finalTranscript = "";
+
+function splitIntoSentences(text) {
+  const cleaned = (text || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
+
+  if (!cleaned) return [];
+
+  const sentences = [];
+  const paragraphs = cleaned.split(/\n+/);
+
+  for (const para of paragraphs) {
+    const p = para.trim();
+    if (!p) continue;
+
+    // Keep end punctuation when present; also keep the final fragment
+    // even if it doesn't end with punctuation.
+    const matches = p.match(/[^.!?\u3002\uff01\uff1f]+[.!?\u3002\uff01\uff1f]+|[^.!?\u3002\uff01\uff1f]+$/g);
+    if (matches) {
+      for (const m of matches) {
+        const s = m.trim();
+        if (s) sentences.push(s);
+      }
+    }
+  }
+
+  return sentences;
+}
+
+function loadScript() {
+  let input = document.getElementById("scriptInput").value;
+  let container = document.getElementById("scriptDisplay");
+  container.innerHTML = "";
+  currentIndex = 0;
+
+  sentences = splitIntoSentences(input);
+
+  if (!sentences.length) {
+    container.innerText = "No sentences detected. Add punctuation (., !, ?) or line breaks, then try again.";
+    updateProgress();
+    return;
+  }
+
+  sentences.forEach((sentence, index) => {
+    let div = document.createElement("div");
+    div.className = "sentence";
+    div.innerText = sentence.trim();
+    container.appendChild(div);
+  });
+
+  updateProgress();
+}
+
+document.getElementById("loadBtn").addEventListener("click", loadScript);
+document.getElementById("startBtn").addEventListener("click", startListening);
+
+function updateProgress() {
+  let percent = sentences.length === 0 ? 0 :
+    Math.round((currentIndex / sentences.length) * 100);
+  document.getElementById("progress").innerText = 
+    "Progress: " + percent + "%";
+}
+
+function startListening() {
+
+  if (!sentences.length) {
+    alert("Please load a script first.");
+    return;
+  }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    alert("SpeechRecognition is not supported in this browser (try Chrome on https/localhost).");
+    return;
+  }
+
+  recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = "en-US";
+
+  finalTranscript = "";
+  document.getElementById("heard").innerText = "";
+
+  function normalizeText(s) {
+    return (s || "")
+      .toLowerCase()
+      .replace(/['’]/g, "'")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function isSentenceMatched(spokenRaw, sentenceRaw, strict) {
+    const spoken = normalizeText(spokenRaw);
+    const sentence = normalizeText(sentenceRaw);
+    if (!spoken || !sentence) return false;
+
+    const sWords = sentence.split(" ").filter(Boolean);
+    const pWords = spoken.split(" ").filter(Boolean);
+    if (!sWords.length || !pWords.length) return false;
+
+    // Fast path: spoken contains the first few words in order.
+    const prefixLen = Math.min(4, sWords.length);
+    const prefix = sWords.slice(0, prefixLen).join(" ");
+    if (prefixLen >= 2 && spoken.includes(prefix)) return true;
+
+    // Fallback: word overlap ratio.
+    const pSet = new Set(pWords);
+    let matched = 0;
+    for (const w of sWords) {
+      if (w.length < 3) continue;
+      if (pSet.has(w)) matched++;
+    }
+
+    const meaningfulTotal = sWords.filter(w => w.length >= 3).length || sWords.length;
+    const ratio = meaningfulTotal ? matched / meaningfulTotal : 0;
+    const threshold = strict ? 0.55 : 0.75;
+    return matched >= 3 && ratio >= threshold;
+  }
+
+  recognition.onresult = function(event) {
+    let interim = "";
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const res = event.results[i];
+      const text = res[0] && res[0].transcript ? res[0].transcript : "";
+      if (res.isFinal) {
+        finalTranscript = (finalTranscript + " " + text).trim();
+      } else {
+        interim = (interim + " " + text).trim();
+      }
+    }
+
+    const heardNow = (finalTranscript + (interim ? " " + interim : "")).trim();
+    document.getElementById("heard").innerText = heardNow ? ("Heard: " + heardNow) : "";
+
+    const displaySentences = document.querySelectorAll(".sentence");
+    if (currentIndex >= sentences.length) return;
+
+    const currentSentence = sentences[currentIndex];
+    const strictHit = isSentenceMatched(finalTranscript, currentSentence, true);
+    const softHit = isSentenceMatched(heardNow, currentSentence, false);
+
+    if (strictHit || softHit) {
+      displaySentences[currentIndex].classList.remove("current");
+      displaySentences[currentIndex].classList.add("done");
+
+      currentIndex++;
+
+      if (currentIndex < sentences.length) {
+        displaySentences[currentIndex].classList.add("current");
+        displaySentences[currentIndex].scrollIntoView({
+          behavior: "smooth",
+          block: "center"
+        });
+      } else {
+        try { recognition.stop(); } catch (e) {}
+      }
+
+      updateProgress();
+    }
+  };
+
+  recognition.onerror = function(e) {
+    document.getElementById("heard").innerText = "Speech error: " + (e && e.error ? e.error : "unknown");
+  };
+
+  document.querySelectorAll(".sentence")[0].classList.add("current");
+
+  recognition.start();
+}
+
+</script>
+
+</body>
+</html>
